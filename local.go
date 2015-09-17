@@ -63,3 +63,7 @@ func (cmd *LocalCmd) SetStdout(buffer io.Writer) {
 func (cmd *LocalCmd) SetStderr(buffer io.Writer) {
 	cmd.cmd.Stderr = buffer
 }
+
+func (cmd *LocalCmd) SetWorkingDir(path string) {
+	cmd.cmd.Dir = path
+}
