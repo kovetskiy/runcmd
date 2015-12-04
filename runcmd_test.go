@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"testing"
+	"time"
 )
 
 var (
@@ -17,6 +18,15 @@ var (
 	cmdInvalidKey = "uname -blah"
 	cmdPipeOut    = "date"
 	cmdPipeIn     = "/usr/bin/tee /tmp/blah"
+
+	quotedMsg = "some message"
+	cmdQuoted = "bash -c 'echo \"" + quotedMsg + "\"'"
+	timeouts  = Timeouts{
+		ConnectionTimeout: 3 * time.Second,
+		KeepAlive:         1 * time.Second,
+		ReceiveTimeout:    3 * time.Second,
+		SendTimeout:       3 * time.Second,
+	}
 
 	// Change it before running the tests:
 	user = "user"
@@ -42,6 +52,28 @@ func TestPassAuth(t *testing.T) {
 		}
 	}()
 	rRunner, err := NewRemotePassAuthRunner(user, host, pass)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := testRun(rRunner); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestKeyAuthTimeout(t *testing.T) {
+	rRunner, err := NewRemoteKeyAuthRunnerWithTimeouts(user, host, key, timeouts)
+	if err != nil {
+		t.Error(err)
+	}
+	if err := testRun(rRunner); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestPassAuthTimeout(t *testing.T) {
+	rRunner, err := NewRemotePassAuthRunnerWithTimeouts(
+		user, host, pass, timeouts,
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -114,6 +146,22 @@ func testRun(runner Runner) error {
 	}
 	for _, i := range out {
 		fmt.Println(i)
+	}
+
+	// Correct output
+	cmd, err = runner.Command("echo ok")
+	if err != nil {
+		return err
+	}
+	output, err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	if len(output) != 1 {
+		return errors.New("bad output length")
+	}
+	if output[0] != "ok" {
+		return errors.New("invalid output")
 	}
 
 	// Valid command with invalid keys:
@@ -211,36 +259,10 @@ func testPipe(localToRemote bool) error {
 	}
 
 	if localToRemote {
-		cmdLocal, err := lRunner.Command(cmdPipeOut)
+		err := testLocalToRemote(lRunner, rRunner)
 		if err != nil {
 			return err
 		}
-		localStdout, err := cmdLocal.StdoutPipe()
-		if err != nil {
-			return err
-		}
-		if err = cmdLocal.Start(); err != nil {
-			return err
-		}
-		cmdRemote, err := rRunner.Command(cmdPipeIn)
-		if err != nil {
-			return err
-		}
-		remoteStdin, err := cmdRemote.StdinPipe()
-		if err != nil {
-			return err
-		}
-		if err = cmdRemote.Start(); err != nil {
-			return err
-		}
-		if _, err = io.Copy(remoteStdin, localStdout); err != nil {
-			return err
-		}
-		err = remoteStdin.Close()
-		if err != nil {
-			return err
-		}
-		return cmdLocal.Wait()
 	}
 
 	cmdLocal, err := lRunner.Command(cmdPipeIn)
@@ -273,4 +295,64 @@ func testPipe(localToRemote bool) error {
 		return err
 	}
 	return cmdRemote.Wait()
+}
+
+func testLocalToRemote(lRunner *Local, rRunner *Remote) error {
+	cmdLocal, err := lRunner.Command(cmdPipeOut)
+	if err != nil {
+		return err
+	}
+	localStdout, err := cmdLocal.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err = cmdLocal.Start(); err != nil {
+		return err
+	}
+	cmdRemote, err := rRunner.Command(cmdPipeIn)
+	if err != nil {
+		return err
+	}
+	remoteStdin, err := cmdRemote.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err = cmdRemote.Start(); err != nil {
+		return err
+	}
+	if _, err = io.Copy(remoteStdin, localStdout); err != nil {
+		return err
+	}
+	err = remoteStdin.Close()
+	if err != nil {
+		return err
+	}
+	return cmdLocal.Wait()
+}
+
+func TestQuotedRun(t *testing.T) {
+	lRunner, err := NewLocalRunner()
+	if err != nil {
+		t.Fatalf("Can't create local runner: %s", err.Error())
+	}
+
+	cmdLocal, err := lRunner.Command(cmdQuoted)
+	if err != nil {
+		t.Fatalf("Can't create command: %s", err.Error())
+	}
+
+	t.Log("Cmdline:", cmdLocal.GetCommandLine())
+
+	result, err := cmdLocal.Run()
+	if err != nil {
+		t.Fatalf("Error during run: %s", err.Error())
+	}
+
+	if len(result) == 0 {
+		t.Fatalf("Command [%s] return empty result", cmdLocal.GetCommandLine())
+	}
+
+	if result[0] != quotedMsg {
+		t.Fatalf("Quoted command error: %#v", result)
+	}
 }

@@ -7,16 +7,19 @@ import (
 	"strings"
 )
 
+// ExecError is type for generating better error messages
 type ExecError struct {
 	ExecutionError error
 	CommandLine    string
 	Output         []string
 }
 
+// Runner is interface for creating workers
 type Runner interface {
 	Command(cmd string) (CmdWorker, error)
 }
 
+// CmdWorker is interface for executing commands
 type CmdWorker interface {
 	Run() ([]string, error)
 	Start() error
@@ -54,8 +57,12 @@ func run(worker CmdWorker) ([]string, error) {
 	worker.SetStdout(&buffer)
 	worker.SetStderr(&buffer)
 
+	if err := worker.Start(); err != nil {
+		return nil, err
+	}
+
 	err := worker.Wait()
-	output := strings.Split(string(buffer.Bytes()), "\n")
+	output := strings.Split(strings.Trim(buffer.String(), "\n"), "\n")
 
 	if err != nil {
 		return nil, newExecError(err, worker.GetCommandLine(), output)
